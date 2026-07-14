@@ -19,7 +19,7 @@ Windows 本地公平游玩伴侣。程序只读取玩家可见的截图和确认
 
 ### 直接运行 EXE
 
-1. 双击 `dist\DemonBluffAssistant-v0.3.3.exe`。
+1. 双击 `dist\DemonBluffAssistant-v0.3.4.exe`。
 2. 浏览器会打开 `http://127.0.0.1:8765`。
 3. 在 Demon Bluff 位于前台时按 `Ctrl+Shift+D` 截取牌桌总览。
 4. 返回伴侣页点击“识别并创建村庄”，检查本地 OCR 摘要后点击“确认创建”。
@@ -37,6 +37,21 @@ dist\StopDemonBluffAssistant.exe
 ```
 
 它只会结束 `DemonBluffAssistant.exe` 和 `DemonBluffAssistant-*.exe`，不会结束游戏本体，也不会误杀关闭工具自身。该工具可以长期复用。
+
+## 智谱 GLM 免费视觉识别
+
+本机 RapidOCR 仍是默认方案。需要第二种识别结果进行对照时，可以选择智谱 `glm-4.6v-flash`。智谱官方当前将该模型标为免费，并明确支持图片 OCR、Base64 图片和 128K 上下文；价格政策以后可能调整，请以[模型说明](https://docs.bigmodel.cn/cn/guide/models/free/glm-4.6v-flash)和[官方价格页](https://bigmodel.cn/pricing)为准。
+
+### 注册和导入 API Key
+
+1. 打开[智谱开放平台](https://bigmodel.cn/)并注册或登录。
+2. 进入[API Key 管理](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)，创建一个 API Key 并复制。
+3. 启动助手，在左侧“画面采集”中找到“截图识别引擎”。
+4. 在“智谱 API Key”中粘贴 Key，点击“保存视觉接口”。无需命令行或环境变量。
+5. 将识别引擎切换为“智谱 GLM-4.6V-Flash”，再点击“识别并创建村庄”或“解析当前局面”。
+6. GLM 返回的结构化结果仍会进入“待确认识别结果”，确认或修正后才能进入求解器。
+
+智谱 Key 与 DeepSeek Key 分开保存，配置视觉接口不会切换当前策略模型。Key 只提交到本机后端，并使用当前 Windows 用户的 DPAPI 加密保存在 `data/model-config.json`；不会进入局面导出或仓库。选择 GLM 时，当前截图会发送到智谱 API；切回本机 RapidOCR 后不会上传截图。删除 Key 时勾选“删除已保存的智谱 Key”再保存。
 
 ### 从源码运行
 
@@ -109,12 +124,12 @@ $env:DEBUG_SAVE_SCREENSHOTS = "1"
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
-.\build.ps1 -Name DemonBluffAssistant-v0.3.3
+.\build.ps1 -Name DemonBluffAssistant-v0.3.4
 ```
 
 构建产物：
 
-- `dist\DemonBluffAssistant-v0.3.3.exe`
+- `dist\DemonBluffAssistant-v0.3.4.exe`
 - `dist\StopDemonBluffAssistant.exe`
 
 本地 API 只绑定 `127.0.0.1`，校验 Host 请求头，默认端口为 8765，可通过 `DEMON_BLUFF_PORT` 修改。截图响应禁止浏览器缓存。若端口被旧版占用，新版会显示明确提示而不会打开旧页面。

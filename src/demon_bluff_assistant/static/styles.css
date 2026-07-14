@@ -72,6 +72,9 @@ input:focus,select:focus,textarea:focus { border-color: rgba(215,181,109,.7); bo
 .capture-actions button { flex: 1; }
 .capture-actions { display: grid; grid-template-columns: 1fr 1fr; }
 .capture-actions #parse-button { grid-column: 1 / -1; }
+.vision-engine-settings { margin: 12px 0; padding: 11px; border: 1px solid rgba(115,166,201,.24); border-radius: 9px; background: rgba(115,166,201,.05); }
+.vision-engine-settings form { margin-top: 10px; }
+.vision-engine-settings .check { margin-top: 4px; }
 .capture-preview { height: 170px; margin-top: 13px; border: 1px dashed #3b3d40; border-radius: 9px; display: grid; place-items: center; overflow: hidden; background: #0b0d10; color: #666; }
 .capture-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .capture-preview img[role="button"] { cursor: zoom-in; }

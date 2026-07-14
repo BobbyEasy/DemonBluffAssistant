@@ -275,3 +275,56 @@ def test_deepseek_strategy_uses_chat_json_and_keeps_vision_on_openai(tmp_path) -
     assert call["response_format"] == {"type": "json_object"}
     assert "visible_role_rules" in call["messages"][1]["content"]
     assert "fortune_teller" in call["messages"][1]["content"]
+
+
+def test_zhipu_glm_vision_uses_base64_image_and_validates_state_patch(tmp_path) -> None:
+    store = ModelConfigStore(tmp_path / "models.json", FakeProtector())
+    store.update(
+        ModelSettingsUpdate(
+            provider="zhipu",
+            model="glm-4.6v-flash",
+            api_key="test-zhipu-key",
+            activate=False,
+        )
+    )
+    client = FakeCompatibleClient(
+        [],
+        '```json\n{"seats":[{"position":1,"visible_role":"Architect",'
+        '"claim_text":"左边有更多恶徒"}],"events":[],"warnings":[],'
+        '"overall_confidence":0.94}\n```',
+    )
+    service = OpenAIService(Settings(), client=client, model_store=store)
+
+    patch = service.parse_capture_zhipu(b"png-bytes", GameState(config=config()))
+
+    assert patch.seats[0].position == 1
+    assert patch.recognition_engine == "glm-4.6v-flash"
+    call = client.chat.completions.calls[0]
+    assert call["model"] == "glm-4.6v-flash"
+    assert "response_format" not in call
+    assert call["extra_body"] == {"thinking": {"type": "disabled"}}
+    image = call["messages"][1]["content"][0]
+    assert image["type"] == "image_url"
+    assert image["image_url"]["url"].startswith("data:image/png;base64,")
+    assert "test-zhipu-key" not in str(call)
+
+
+def test_zhipu_glm_vision_rejects_position_outside_village(tmp_path) -> None:
+    store = ModelConfigStore(tmp_path / "models.json", FakeProtector())
+    store.update(
+        ModelSettingsUpdate(
+            provider="zhipu",
+            model="glm-4.6v-flash",
+            api_key="test-zhipu-key",
+            activate=False,
+        )
+    )
+    client = FakeCompatibleClient(
+        [],
+        '{"seats":[{"position":9,"visible_role":"Architect"}],'
+        '"overall_confidence":0.9}',
+    )
+    service = OpenAIService(Settings(), client=client, model_store=store)
+
+    with pytest.raises(IntegrationUnavailable, match="牌位超出"):
+        service.parse_capture_zhipu(b"png", GameState(config=config()))

@@ -14,7 +14,7 @@
       <div class="sigil">DB</div>
       <div>
         <p class="eyebrow">FAIR-PLAY COMPANION</p>
-        <h1>Demon Bluff 决策助手 <small>v0.3.3</small></h1>
+        <h1>Demon Bluff 决策助手 <small>v0.3.4</small></h1>
       </div>
     </div>
     <div class="top-status">
@@ -77,6 +77,18 @@
           <span id="capture-status-dot" class="dot idle"></span>
         </div>
         <p id="capture-message" class="muted">在游戏内按快捷键抓图，然后自动识别并创建村庄。</p>
+        <div class="vision-engine-settings">
+          <label>截图识别引擎<select id="vision-engine">
+            <option value="local">本机 RapidOCR（默认、完全离线）</option>
+            <option value="glm">智谱 GLM-4.6V-Flash（联网、当前免费）</option>
+          </select></label>
+          <form id="glm-vision-form" class="form-grid compact">
+            <label class="wide">智谱 API Key<input id="glm-vision-api-key" type="password" autocomplete="new-password" placeholder="留空则保留已保存的 Key"></label>
+            <label class="check compact-check"><input id="clear-glm-vision-key" type="checkbox">删除已保存的智谱 Key</label>
+            <button class="secondary" type="submit">保存视觉接口</button>
+          </form>
+          <p id="glm-vision-status" class="microcopy">RapidOCR 在本机处理截图，不会上传图片。</p>
+        </div>
         <div class="capture-actions">
           <button id="capture-button" class="secondary" type="button">抓取当前前台窗口</button>
           <button id="detect-village-button" class="primary" type="button" disabled>识别并创建村庄</button>
@@ -96,7 +108,7 @@
             <button id="confirm-village-button" class="primary" type="button" disabled>确认创建</button>
           </div>
         </div>
-        <p class="microcopy">点击截图预览可放大查看。截图使用本机离线 OCR，不消耗 API；不会读取 Player.log 或隐藏真身。确认后的文字局面才会交给策略模型。</p>
+        <p class="microcopy">点击截图预览可放大查看。默认使用本机离线 OCR；只有主动选择 GLM 时才会把当前截图发送给智谱。不会读取 Player.log 或隐藏真身，任何结果仍须确认。</p>
       </section>
 
       <section id="manual-entry" class="panel">

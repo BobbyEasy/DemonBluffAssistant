@@ -37,7 +37,7 @@ def create_app(
     captures,
     serve_static: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="Demon Bluff Assistant", version="0.3.3")
+    app = FastAPI(title="Demon Bluff Assistant", version="0.3.4")
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "testserver"],
@@ -73,12 +73,16 @@ def create_app(
         vision = next(
             item for item in models.providers if item.provider == ModelProvider.OPENAI
         )
+        glm_vision = next(
+            item for item in models.providers if item.provider == ModelProvider.ZHIPU
+        )
         public.update(
             {
                 "provider": active.provider,
                 "model": active.model,
                 "strategy_configured": active.configured,
                 "openai_configured": vision.configured,
+                "glm_vision_configured": glm_vision.configured,
                 "recognition_mode": "local",
                 "local_ocr_available": True,
             }
@@ -158,7 +162,7 @@ def create_app(
     def parse_capture(
         capture_id: str,
         session_id: str = Query(...),
-        engine: str = Query("local", pattern="^(local|openai)$"),
+        engine: str = Query("local", pattern="^(local|openai|glm)$"),
     ):
         png = captures.registry.get(capture_id)
         if png is None:
@@ -166,18 +170,22 @@ def create_app(
         game_state = store.get(session_id)
         if engine == "openai":
             return openai_service.parse_capture(png, game_state)
+        if engine == "glm":
+            return openai_service.parse_capture_zhipu(png, game_state)
         return local_vision.parse_capture(png, game_state)
 
     @app.post("/api/captures/{capture_id}/village")
     def parse_village(
         capture_id: str,
-        engine: str = Query("local", pattern="^(local|openai)$"),
+        engine: str = Query("local", pattern="^(local|openai|glm)$"),
     ):
         png = captures.registry.get(capture_id)
         if png is None:
             raise HTTPException(status_code=404, detail="截图不存在或已过期。")
         if engine == "openai":
             return openai_service.parse_village(png)
+        if engine == "glm":
+            return openai_service.parse_village_zhipu(png)
         return local_vision.parse_village(png)
 
     if serve_static:

@@ -32,13 +32,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 function bindElements() {
-  for (const id of ["api-status","model-settings-badge","model-settings-form","model-provider","model-name","model-options","model-base-url-wrap","model-base-url","model-api-key","clear-model-key","model-settings-note","session-badge","new-session-form","undo-button","export-button","import-input","capture-button","detect-village-button","parse-button","capture-message","capture-status-dot","capture-preview","capture-preview-wrap","capture-lightbox","capture-lightbox-image","zoom-out-button","zoom-in-button","zoom-reset-button","zoom-label","close-lightbox-button","village-detection","village-detection-summary","village-detection-evidence","village-detection-warnings","confirm-village-button","discard-village-button","manual-form","manual-type","manual-seat-fields","manual-event-fields","manual-visible-role","event-role","board","village-stats","pending-json","pending-warnings","confidence-badge","clear-pending","export-recognition-button","confirm-pending","reanalyze-button","advice","assessments","solver-notes","toast"]) ui[id] = document.getElementById(id);
+  for (const id of ["api-status","model-settings-badge","model-settings-form","model-provider","model-name","model-options","model-base-url-wrap","model-base-url","model-api-key","clear-model-key","model-settings-note","session-badge","new-session-form","undo-button","export-button","import-input","capture-button","detect-village-button","parse-button","capture-message","capture-status-dot","vision-engine","glm-vision-form","glm-vision-api-key","clear-glm-vision-key","glm-vision-status","capture-preview","capture-preview-wrap","capture-lightbox","capture-lightbox-image","zoom-out-button","zoom-in-button","zoom-reset-button","zoom-label","close-lightbox-button","village-detection","village-detection-summary","village-detection-evidence","village-detection-warnings","confirm-village-button","discard-village-button","manual-form","manual-type","manual-seat-fields","manual-event-fields","manual-visible-role","event-role","board","village-stats","pending-json","pending-warnings","confidence-badge","clear-pending","export-recognition-button","confirm-pending","reanalyze-button","advice","assessments","solver-notes","toast"]) ui[id] = document.getElementById(id);
 }
 
 function bindEvents() {
   ui["new-session-form"].addEventListener("submit", createSession);
   ui["model-settings-form"].addEventListener("submit", saveModelSettings);
   ui["model-provider"].addEventListener("change", renderSelectedProvider);
+  ui["glm-vision-form"].addEventListener("submit", saveGlmVisionSettings);
+  ui["vision-engine"].addEventListener("change", renderGlmVisionSettings);
   ui["capture-button"].addEventListener("click", captureNow);
   ui["parse-button"].addEventListener("click", parseCapture);
   ui["detect-village-button"].addEventListener("click", detectVillage);
@@ -134,6 +136,23 @@ function renderModelSettings() {
   ui["model-settings-badge"].textContent = active?.configured ? `已连接 ${active.label}` : "策略模型可选";
   ui["model-provider"].value = app.modelSettings?.active_provider || "openai";
   renderSelectedProvider();
+  renderGlmVisionSettings();
+}
+
+function renderGlmVisionSettings() {
+  const profile = providerStatus("zhipu");
+  const selected = selectedVisionEngine();
+  if (selected === "local") {
+    ui["glm-vision-status"].textContent = "RapidOCR 在本机处理截图，不会上传图片。";
+  } else if (profile?.configured) {
+    ui["glm-vision-status"].textContent = "GLM-4.6V-Flash 已配置；识别时当前截图会发送到智谱 API。";
+  } else {
+    ui["glm-vision-status"].textContent = "尚未配置智谱 API Key；保存后才能使用 GLM 视觉识别。";
+  }
+}
+
+function selectedVisionEngine() {
+  return ui["vision-engine"]?.value === "glm" ? "glm" : "local";
 }
 
 function renderSelectedProvider() {
@@ -169,6 +188,27 @@ async function saveModelSettings(event) {
     renderModelSettings();
     renderConfig();
     showToast(`已切换到 ${payload.model}。`, false);
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function saveGlmVisionSettings(event) {
+  event.preventDefault();
+  const payload = {
+    provider: "zhipu",
+    model: "glm-4.6v-flash",
+    api_key: ui["glm-vision-api-key"].value.trim() || null,
+    base_url: null,
+    activate: false,
+    clear_api_key: ui["clear-glm-vision-key"].checked,
+  };
+  try {
+    app.modelSettings = await api("/api/model-settings", { method: "PUT", body: JSON.stringify(payload) });
+    app.config = await api("/api/config");
+    ui["glm-vision-api-key"].value = "";
+    ui["clear-glm-vision-key"].checked = false;
+    renderModelSettings();
+    renderConfig();
+    showToast(payload.clear_api_key ? "已删除智谱视觉 API Key。" : "智谱视觉接口已保存。", false);
   } catch (error) { showToast(error.message, true); }
 }
 
@@ -255,7 +295,7 @@ async function detectVillage() {
   ui["detect-village-button"].disabled = true;
   ui["detect-village-button"].textContent = "正在识别…";
   try {
-    app.villageSuggestion = await api(`/api/captures/${app.captureId}/village`, { method: "POST" });
+    app.villageSuggestion = await api(`/api/captures/${app.captureId}/village?engine=${selectedVisionEngine()}`, { method: "POST" });
     renderVillageSuggestion();
   } catch (error) { showToast(error.message, true); }
   finally {
@@ -268,8 +308,9 @@ function renderVillageSuggestion() {
   const suggestion = app.villageSuggestion;
   ui["village-detection"].classList.remove("hidden");
   const config = suggestion?.config;
+  const engine = suggestion?.recognition_engine === "rapidocr-local" ? "本地 OCR" : (suggestion?.recognition_engine || "未知引擎");
   ui["village-detection-summary"].textContent = config
-    ? `本地 OCR · ${config.card_count} 张牌 · ${config.evil_count} 恶徒 · ${config.minion_count} 爪牙 · ${config.demon_count} 恶魔 · ${config.health} 生命${config.deck_roles?.length ? ` · 牌组 ${config.deck_roles.length} 个角色` : ""}`
+    ? `${engine} · ${config.card_count} 张牌 · ${config.evil_count} 恶徒 · ${config.minion_count} 爪牙 · ${config.demon_count} 恶魔 · ${config.health} 生命${config.deck_roles?.length ? ` · 牌组 ${config.deck_roles.length} 个角色` : ""}`
     : "截图中的建村信息不足，尚不能自动创建。";
   ui["village-detection-evidence"].textContent = suggestion?.raw_text?.length
     ? `识别依据：${suggestion.raw_text.join(" ｜ ")}`
@@ -295,7 +336,7 @@ async function parseCapture() {
   ui["parse-button"].disabled = true;
   ui["parse-button"].textContent = "正在解析…";
   try {
-    const patch = await api(`/api/captures/${app.captureId}/parse?session_id=${app.session.session_id}`, { method: "POST" });
+    const patch = await api(`/api/captures/${app.captureId}/parse?session_id=${app.session.session_id}&engine=${selectedVisionEngine()}`, { method: "POST" });
     setPending(patch);
     showToast("识别完成。请检查并修正待确认内容。", false);
   } catch (error) { showToast(error.message, true); }

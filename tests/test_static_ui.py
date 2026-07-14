@@ -23,6 +23,9 @@ def test_companion_page_contains_required_workflow_surfaces() -> None:
         "model-settings-form",
         "model-provider",
         "model-api-key",
+        "vision-engine",
+        "glm-vision-form",
+        "glm-vision-api-key",
         "detect-village-button",
         "confirm-village-button",
         "village-detection-evidence",
@@ -33,7 +36,7 @@ def test_companion_page_contains_required_workflow_surfaces() -> None:
         assert f'id="{element_id}"' in html
     assert "/static/styles.css" in html
     assert "/static/app.js" in html
-    assert "v0.3.3" in html
+    assert "v0.3.4" in html
     assert "本机离线 OCR" in html
 
 
@@ -52,3 +55,5 @@ def test_frontend_submits_api_key_only_to_local_settings_endpoint() -> None:
     assert "setPreviewZoom" in javascript
     assert "exportRecognition" in javascript
     assert 'ui["pending-json"].value' in javascript
+    assert "saveGlmVisionSettings" in javascript
+    assert "selectedVisionEngine" in javascript

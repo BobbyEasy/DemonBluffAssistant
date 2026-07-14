@@ -81,6 +81,37 @@ def test_blank_api_key_preserves_saved_secret_and_clear_is_explicit(tmp_path) ->
     assert store.resolve(ModelProvider.DEEPSEEK, Settings()) is None
 
 
+def test_zhipu_vision_key_does_not_switch_active_strategy_provider(tmp_path) -> None:
+    store = ModelConfigStore(tmp_path / "models.json", FakeProtector())
+    store.update(
+        ModelSettingsUpdate(
+            provider="deepseek",
+            model="deepseek-v4-pro",
+            api_key="test-deepseek-key",
+            activate=True,
+        )
+    )
+
+    view = store.update(
+        ModelSettingsUpdate(
+            provider="zhipu",
+            model="glm-4.6v-flash",
+            api_key="test-zhipu-key",
+            activate=False,
+        )
+    )
+
+    assert view.active_provider == ModelProvider.DEEPSEEK
+    profile = store.resolve(ModelProvider.ZHIPU, Settings())
+    assert profile is not None
+    assert profile.model == "glm-4.6v-flash"
+    assert profile.base_url == "https://open.bigmodel.cn/api/paas/v4"
+    assert profile.api_key == "test-zhipu-key"
+    zhipu = next(item for item in view.providers if item.provider == "zhipu")
+    assert zhipu.configured is True
+    assert zhipu.supports_vision is True
+
+
 def test_custom_provider_requires_an_http_base_url() -> None:
     with pytest.raises(ValidationError):
         ModelSettingsUpdate(

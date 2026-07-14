@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from typing import Any
 
 from openai import OpenAI
@@ -56,6 +57,16 @@ VILLAGE_INSTRUCTIONS = """
 """.strip()
 
 
+ZHIPU_VISION_INSTRUCTIONS = """
+你是 Demon Bluff Demo 的截图抄录器，不负责推断隐藏身份或制定策略。
+只记录截图中明确可见的内容，并且只输出一个 JSON 对象，不要输出 Markdown 或解释文字。
+牌位必须使用卡牌上方显示的 #数字。证词中的 #数字只是证词目标，不能当作卡牌位置锚点。
+角色名必须按卡牌本身的位置归属；证词必须根据气泡尾部指向的卡牌归属，不能按文字最近距离猜测。
+未翻开的卡牌不能虚构角色。无法确定的字段保持默认值并写入 warnings。
+visible_role 使用给定角色目录中的英文 name_en；deck_roles 使用 role_id。
+""".strip()
+
+
 class OpenAIService:
     def __init__(
         self,
@@ -83,6 +94,18 @@ class OpenAIService:
         if profile is None:
             raise IntegrationUnavailable(
                 "未配置 OpenAI 视觉模型 API Key；请在模型设置中配置后重试。"
+            )
+        return profile
+
+    def _zhipu_vision_profile(self) -> ResolvedProfile:
+        profile = (
+            self.model_store.resolve(ModelProvider.ZHIPU, self.settings)
+            if self.model_store is not None
+            else None
+        )
+        if profile is None:
+            raise IntegrationUnavailable(
+                "未配置智谱 GLM-4.6V-Flash API Key；请在画面采集区配置后重试。"
             )
         return profile
 
@@ -162,6 +185,118 @@ class OpenAIService:
             store=False,
         )
         return VillageSetupSuggestion.model_validate(parsed)
+
+    def parse_capture_zhipu(
+        self, png_bytes: bytes, state: GameState
+    ) -> StatePatch:
+        prompt = (
+            "当前村庄配置与已确认局面：\n"
+            + state.model_dump_json(exclude={"events": {"__all__": {"raw_text"}}})
+            + "\n角色目录：\n"
+            + self._role_directory_json()
+            + "\n请抄录这张当前局面截图。"
+        )
+        patch = self._zhipu_visual_json(
+            png_bytes=png_bytes,
+            prompt=prompt,
+            output_model=StatePatch,
+        )
+        valid_positions = set(range(1, state.config.card_count + 1))
+        referenced = {seat.position for seat in patch.seats}
+        for event in patch.events:
+            referenced.add(event.speaker_position)
+            referenced.update(event.targets)
+        if not referenced.issubset(valid_positions):
+            invalid = sorted(referenced - valid_positions)
+            raise IntegrationUnavailable(
+                f"智谱视觉结果包含牌位超出当前村庄范围：{invalid}。"
+            )
+        patch.recognition_engine = self._zhipu_vision_profile().model
+        return patch
+
+    def parse_village_zhipu(self, png_bytes: bytes) -> VillageSetupSuggestion:
+        prompt = (
+            "请抄录截图中的牌数、恶徒总数、爪牙/走卒数、恶魔数、生命和可见牌组角色。"
+            "数量为 0 时必须保留 0，不能当作缺失。\n角色目录：\n"
+            + self._role_directory_json()
+        )
+        suggestion = self._zhipu_visual_json(
+            png_bytes=png_bytes,
+            prompt=prompt,
+            output_model=VillageSetupSuggestion,
+        )
+        suggestion.recognition_engine = self._zhipu_vision_profile().model
+        return suggestion
+
+    def _zhipu_visual_json(self, *, png_bytes: bytes, prompt: str, output_model):
+        profile = self._zhipu_vision_profile()
+        client = self._client_for(profile)
+        encoded = base64.b64encode(png_bytes).decode("ascii")
+        schema = json.dumps(
+            output_model.model_json_schema(), ensure_ascii=False, separators=(",", ":")
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": ZHIPU_VISION_INSTRUCTIONS
+                + "\n输出必须符合以下 JSON Schema：\n"
+                + schema,
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{encoded}"
+                        },
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            },
+        ]
+        last_error: Exception | None = None
+        for _ in range(2):
+            try:
+                response = client.chat.completions.create(
+                    model=profile.model,
+                    messages=messages,
+                    stream=False,
+                    max_tokens=4096,
+                    extra_body={"thinking": {"type": "disabled"}},
+                )
+                content = response.choices[0].message.content
+                if not content:
+                    raise ValueError("模型返回空内容")
+                return output_model.model_validate_json(
+                    self._extract_json_object(content)
+                )
+            except Exception as exc:
+                last_error = exc
+        raise IntegrationUnavailable(
+            f"智谱视觉结果无法通过结构校验：{last_error}"
+        ) from last_error
+
+    @staticmethod
+    def _extract_json_object(content: str) -> str:
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        start = content.find("{")
+        end = content.rfind("}")
+        if start < 0 or end < start:
+            raise ValueError("未找到 JSON 对象")
+        return content[start : end + 1]
+
+    def _role_directory_json(self) -> str:
+        roles = [
+            {
+                "role_id": role.role_id,
+                "name_en": role.name_en,
+                "name_zh": role.name_zh,
+                "aliases": role.aliases,
+            }
+            for role in self.catalog.roles.values()
+        ]
+        return json.dumps(roles, ensure_ascii=False, separators=(",", ":"))
 
     def generate_advice(self, state: GameState, report: SolverReport) -> Advice:
         if not report.satisfiable:

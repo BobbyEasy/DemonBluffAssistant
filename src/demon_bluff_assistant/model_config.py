@@ -21,6 +21,7 @@ class ModelConfigError(RuntimeError):
 class ModelProvider(StrEnum):
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
+    ZHIPU = "zhipu"
     CUSTOM = "custom"
 
 
@@ -38,6 +39,13 @@ PROVIDER_DEFAULTS = {
         "base_url": "https://api.deepseek.com",
         "known_models": ["deepseek-v4-pro", "deepseek-v4-flash"],
         "supports_vision": False,
+    },
+    ModelProvider.ZHIPU: {
+        "label": "智谱 GLM",
+        "model": "glm-4.6v-flash",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "known_models": ["glm-4.6v-flash"],
+        "supports_vision": True,
     },
     ModelProvider.CUSTOM: {
         "label": "兼容接口",

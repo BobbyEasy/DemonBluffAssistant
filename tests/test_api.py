@@ -53,6 +53,28 @@ class FakeAI(OpenAIService):
             overall_confidence=0.96,
         )
 
+    def parse_capture_zhipu(self, png_bytes, state):
+        assert png_bytes == b"fake-png"
+        return StatePatch(
+            seats=[{"position": 1, "visible_role": "Architect"}],
+            overall_confidence=0.95,
+            recognition_engine="glm-4.6v-flash",
+        )
+
+    def parse_village_zhipu(self, png_bytes):
+        assert png_bytes == b"fake-png"
+        return VillageSetupSuggestion(
+            config={
+                "card_count": 4,
+                "evil_count": 1,
+                "minion_count": 0,
+                "demon_count": 1,
+                "health": 9,
+            },
+            overall_confidence=0.95,
+            recognition_engine="glm-4.6v-flash",
+        )
+
     def generate_advice(self, state, report):
         return Advice(
             action_type="wait",
@@ -208,6 +230,33 @@ def test_capture_can_detect_village_before_a_session_exists(tmp_path) -> None:
     assert detected.json()["config"]["card_count"] == 4
     assert detected.json()["config"]["health"] == 9
     assert detected.json()["recognition_engine"] == "rapidocr-local"
+
+
+def test_capture_can_use_zhipu_glm_as_optional_vision_engine(tmp_path) -> None:
+    api = client(tmp_path)
+    capture_id = api.post("/api/captures").json()["capture_id"]
+    state = api.post(
+        "/api/sessions",
+        json={
+            "card_count": 4,
+            "evil_count": 1,
+            "minion_count": 0,
+            "demon_count": 1,
+        },
+    ).json()
+
+    parsed = api.post(
+        f"/api/captures/{capture_id}/parse",
+        params={"session_id": state["session_id"], "engine": "glm"},
+    )
+    village = api.post(
+        f"/api/captures/{capture_id}/village", params={"engine": "glm"}
+    )
+
+    assert parsed.status_code == 200
+    assert parsed.json()["recognition_engine"] == "glm-4.6v-flash"
+    assert village.status_code == 200
+    assert village.json()["recognition_engine"] == "glm-4.6v-flash"
 
 
 def test_capture_image_is_not_cached_and_untrusted_host_is_rejected(tmp_path) -> None:
