@@ -11,6 +11,7 @@ const app = {
   analysis: null,
   villageSuggestion: null,
   previewZoom: 1,
+  chat: [],
 };
 
 const labels = {
@@ -32,7 +33,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 function bindElements() {
-  for (const id of ["api-status","model-settings-badge","model-settings-form","model-provider","model-name","model-options","model-base-url-wrap","model-base-url","model-api-key","clear-model-key","model-settings-note","session-badge","new-session-form","undo-button","export-button","import-input","capture-button","detect-village-button","parse-button","capture-message","capture-status-dot","vision-engine","glm-vision-form","glm-vision-api-key","clear-glm-vision-key","glm-vision-status","capture-preview","capture-preview-wrap","capture-lightbox","capture-lightbox-image","zoom-out-button","zoom-in-button","zoom-reset-button","zoom-label","close-lightbox-button","village-detection","village-detection-summary","village-detection-evidence","village-detection-warnings","confirm-village-button","discard-village-button","manual-form","manual-type","manual-seat-fields","manual-event-fields","manual-visible-role","event-role","board","village-stats","pending-json","pending-warnings","confidence-badge","clear-pending","export-recognition-button","confirm-pending","reanalyze-button","advice","assessments","solver-notes","toast"]) ui[id] = document.getElementById(id);
+  for (const id of ["api-status","model-settings-badge","model-settings-form","model-provider","model-name","model-options","model-base-url-wrap","model-base-url","model-api-key","clear-model-key","model-settings-note","session-badge","new-session-form","undo-button","export-button","import-input","capture-button","detect-village-button","parse-button","capture-message","capture-status-dot","vision-engine","glm-vision-form","glm-vision-api-key","clear-glm-vision-key","glm-vision-status","capture-preview","capture-preview-wrap","capture-lightbox","capture-lightbox-image","zoom-out-button","zoom-in-button","zoom-reset-button","zoom-label","close-lightbox-button","village-detection","village-detection-summary","village-detection-evidence","village-detection-warnings","confirm-village-button","discard-village-button","manual-form","manual-type","manual-seat-fields","manual-event-fields","manual-visible-role","event-role","board","village-stats","pending-json","pending-summary","pending-warnings","confidence-badge","clear-pending","export-recognition-button","confirm-pending","reanalyze-button","export-analysis-button","export-dataset-button","advice","assessments","solver-notes","workflow-status","workflow-step-1","workflow-step-2","workflow-step-3","workflow-step-4","chat-form","chat-input","chat-send-button","clear-chat-button","chat-messages","toast"]) ui[id] = document.getElementById(id);
 }
 
 function bindEvents() {
@@ -53,6 +54,10 @@ function bindEvents() {
   ui["export-button"].addEventListener("click", exportSession);
   ui["import-input"].addEventListener("change", importSession);
   ui["reanalyze-button"].addEventListener("click", analyze);
+  ui["export-analysis-button"].addEventListener("click", exportAnalysis);
+  ui["export-dataset-button"].addEventListener("click", exportDataset);
+  ui["chat-form"].addEventListener("submit", sendChatMessage);
+  ui["clear-chat-button"].addEventListener("click", clearChat);
   ui["manual-type"].addEventListener("change", toggleManualType);
   ui["manual-form"].addEventListener("submit", addManualEntry);
   ui["pending-json"].addEventListener("input", validatePendingEditor);
@@ -97,6 +102,7 @@ async function bootstrap() {
       try { app.session = await api(`/api/sessions/${stored}`); }
       catch (_) { localStorage.removeItem("demon-bluff-session"); }
     }
+    if (app.session) await loadChat();
     renderSession();
   } catch (error) { showToast(error.message, true); }
 }
@@ -220,9 +226,29 @@ function renderRoleOptions() {
 
 async function createSession(event) {
   event.preventDefault();
-  const values = Object.fromEntries(new FormData(event.currentTarget));
-  for (const key of ["card_count","evil_count","minion_count","demon_count","health"]) values[key] = Number(values[key]);
-  await createSessionFromConfig(values);
+  try {
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    for (const key of ["card_count","health"]) values[key] = Number(values[key]);
+    for (const key of ["evil_count","minion_count","demon_count"]) {
+      const range = parseCountRange(values[key]);
+      values[key] = range.minimum;
+      values[`${key}_max`] = range.maximum;
+    }
+    await createSessionFromConfig(values);
+  } catch (error) { showToast(error.message, true); }
+}
+
+function parseCountRange(value) {
+  const match = String(value).trim().match(/^(\d{1,2})(?:\s*[-–—~至到]\s*(\d{1,2}))?$/);
+  if (!match) throw new Error(`数量“${value}”格式不正确，请填写 2 或 2-4。`);
+  const minimum = Number(match[1]);
+  const maximum = Number(match[2] ?? match[1]);
+  if (maximum < minimum) throw new Error(`数量范围“${value}”的最大值不能小于最小值。`);
+  return { minimum, maximum };
+}
+
+function formatCountRange(minimum, maximum) {
+  return maximum == null || minimum === maximum ? String(minimum) : `${minimum}-${maximum}`;
 }
 
 async function createSessionFromConfig(values) {
@@ -230,6 +256,7 @@ async function createSessionFromConfig(values) {
     app.session = await api("/api/sessions", { method: "POST", body: JSON.stringify(values) });
     localStorage.setItem("demon-bluff-session", app.session.session_id);
     app.analysis = null;
+    app.chat = [];
     setPending(emptyPatch());
     renderSession();
     showToast("新村庄已建立。请先采集牌桌总览和牌组页。", false);
@@ -242,11 +269,20 @@ function renderSession() {
   ui["undo-button"].disabled = !active;
   ui["export-button"].disabled = !active;
   ui["reanalyze-button"].disabled = !active;
+  ui["chat-input"].disabled = !active;
+  ui["chat-send-button"].disabled = !active;
+  ui["clear-chat-button"].disabled = !active || app.chat.length === 0;
   ui["session-badge"].textContent = active ? `#${app.session.session_id.slice(0, 6)}` : "未开始";
+  renderWorkflow();
+  renderChat();
   if (!active) return;
   const config = app.session.config;
   ui["village-stats"].innerHTML = [
-    ["牌", config.card_count], ["恶徒", config.evil_count], ["爪牙", config.minion_count], ["恶魔", config.demon_count], ["生命", config.health]
+    ["牌", config.card_count],
+    ["恶徒", formatCountRange(config.evil_count, config.evil_count_max)],
+    ["爪牙", formatCountRange(config.minion_count, config.minion_count_max)],
+    ["恶魔", formatCountRange(config.demon_count, config.demon_count_max)],
+    ["生命", config.health]
   ].map(([name,value]) => `<span class="stat">${name}<b>${value}</b></span>`).join("");
   renderBoard();
 }
@@ -287,6 +323,7 @@ function acceptCaptureStatus(status) {
     ui["capture-preview-wrap"].classList.remove("empty");
     ui["detect-village-button"].disabled = false;
     ui["parse-button"].disabled = !app.session;
+    renderWorkflow();
   }
 }
 
@@ -310,7 +347,7 @@ function renderVillageSuggestion() {
   const config = suggestion?.config;
   const engine = suggestion?.recognition_engine === "rapidocr-local" ? "本地 OCR" : (suggestion?.recognition_engine || "未知引擎");
   ui["village-detection-summary"].textContent = config
-    ? `${engine} · ${config.card_count} 张牌 · ${config.evil_count} 恶徒 · ${config.minion_count} 爪牙 · ${config.demon_count} 恶魔 · ${config.health} 生命${config.deck_roles?.length ? ` · 牌组 ${config.deck_roles.length} 个角色` : ""}`
+    ? `${engine} · ${config.card_count} 张牌 · ${formatCountRange(config.evil_count, config.evil_count_max)} 恶徒 · ${formatCountRange(config.minion_count, config.minion_count_max)} 爪牙 · ${formatCountRange(config.demon_count, config.demon_count_max)} 恶魔 · ${config.health} 生命${config.deck_roles?.length ? ` · 牌组 ${config.deck_roles.length} 个角色` : ""}`
     : "截图中的建村信息不足，尚不能自动创建。";
   ui["village-detection-evidence"].textContent = suggestion?.raw_text?.length
     ? `识别依据：${suggestion.raw_text.join(" ｜ ")}`
@@ -349,25 +386,44 @@ function setPending(patch) {
   app.pending = patch;
   ui["pending-json"].value = JSON.stringify(patch, null, 2);
   ui["pending-warnings"].innerHTML = (patch.warnings || []).map(item => `<div class="warning">${escapeHtml(item)}</div>`).join("");
+  renderPendingSummary(patch);
   const hasContent = (patch.seats?.length || 0) + (patch.events?.length || 0) > 0;
   const confidence = Math.round((patch.overall_confidence || 0) * 100);
   ui["confidence-badge"].textContent = hasContent ? `识别置信度 ${confidence}%` : "无待确认内容";
   ui["confirm-pending"].disabled = !hasContent;
   ui["export-recognition-button"].disabled = !hasRecognitionData(patch);
+  renderWorkflow();
 }
 
 function validatePendingEditor() {
   try {
     const value = JSON.parse(ui["pending-json"].value);
+    app.pending = value;
     const hasContent = (value.seats?.length || 0) + (value.events?.length || 0) > 0;
     ui["confirm-pending"].disabled = !hasContent;
     ui["export-recognition-button"].disabled = !hasRecognitionData(value);
     ui["pending-json"].classList.remove("invalid");
+    renderPendingSummary(value);
+    renderWorkflow();
   } catch (_) {
     ui["confirm-pending"].disabled = true;
     ui["export-recognition-button"].disabled = true;
     ui["pending-json"].classList.add("invalid");
   }
+}
+
+function renderPendingSummary(patch) {
+  const seats = patch?.seats || [];
+  const events = patch?.events || [];
+  if (!seats.length && !events.length) {
+    ui["pending-summary"].className = "pending-summary empty-state";
+    ui["pending-summary"].innerHTML = "<div><strong>暂无识别内容</strong><p>解析截图后先在这里核对牌号、角色和证词。</p></div>";
+    return;
+  }
+  const seatCards = seats.map(seat => `<article><b>#${seat.position} · ${escapeHtml(seat.visible_role || "未知角色")}</b><span>${seat.revealed ? "已翻开" : "未翻开"}${seat.claim_text ? ` · ${escapeHtml(seat.claim_text)}` : ""}</span></article>`).join("");
+  const eventCards = events.map(event => `<article><b>#${event.speaker_position} 证词 · ${escapeHtml(event.kind)}</b><span>${event.targets?.length ? `目标 #${event.targets.join(", #")} · ` : ""}${escapeHtml(event.raw_text || (event.value ?? "待核对"))}</span></article>`).join("");
+  ui["pending-summary"].className = "pending-summary";
+  ui["pending-summary"].innerHTML = seatCards + eventCards;
 }
 
 function hasRecognitionData(value) {
@@ -467,11 +523,29 @@ function renderAnalysis() {
   ui.assessments.innerHTML = report.assessments.map(item => `<div class="assessment"><b>#${item.position} · ${labels[item.classification]}</b><span>${(item.consistent_world_share * 100).toFixed(1)}%</span></div>`).join("");
   const conflict = report.conflict_event_ids.length ? [`冲突事件：${report.conflict_event_ids.join(", ")}`] : [];
   ui["solver-notes"].innerHTML = [...conflict, ...report.notes].map(note => `<p>• ${escapeHtml(note)}</p>`).join("");
+  ui["export-analysis-button"].disabled = false;
+  ui["export-dataset-button"].disabled = false;
+  renderWorkflow();
+}
+
+async function exportAnalysis() {
+  if (!app.session || !app.analysis) return;
+  try {
+    const data = await api(`/api/sessions/${app.session.session_id}/analysis/export`);
+    downloadJson(data, `demon-bluff-analysis-${app.session.session_id.slice(0, 8)}.json`);
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function exportDataset() {
+  try {
+    const data = await api("/api/dataset/export");
+    downloadJson(data, `demon-bluff-dataset-${new Date().toISOString().slice(0, 10)}.json`);
+  } catch (error) { showToast(error.message, true); }
 }
 
 async function undo() {
   if (!app.session) return;
-  try { app.session = await api(`/api/sessions/${app.session.session_id}/undo`, { method: "POST" }); app.analysis = null; renderSession(); await analyze(); }
+  try { app.session = await api(`/api/sessions/${app.session.session_id}/undo`, { method: "POST" }); app.analysis = null; ui["export-analysis-button"].disabled = true; renderSession(); await analyze(); }
   catch (error) { showToast(error.message, true); }
 }
 
@@ -479,10 +553,7 @@ async function exportSession() {
   if (!app.session) return;
   try {
     const data = await api(`/api/sessions/${app.session.session_id}/export`);
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    link.download = `demon-bluff-${app.session.session_id.slice(0, 8)}.json`;
-    link.click(); URL.revokeObjectURL(link.href);
+    downloadJson(data, `demon-bluff-${app.session.session_id.slice(0, 8)}.json`);
   } catch (error) { showToast(error.message, true); }
 }
 
@@ -491,9 +562,76 @@ async function importSession(event) {
   try {
     app.session = await api("/api/sessions/import", { method: "POST", body: await file.text() });
     localStorage.setItem("demon-bluff-session", app.session.session_id);
-    app.analysis = null; renderSession(); await analyze(); showToast("局面已导入。", false);
+    app.analysis = null; app.chat = []; await loadChat(); renderSession(); await analyze(); showToast("局面已导入。", false);
   } catch (error) { showToast(error.message, true); }
   event.target.value = "";
+}
+
+function downloadJson(data, filename) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function renderWorkflow() {
+  const pendingCount = (app.pending?.seats?.length || 0) + (app.pending?.events?.length || 0);
+  const step = !app.session ? 1 : pendingCount ? 3 : app.analysis ? 4 : 2;
+  ui["workflow-status"].textContent = `第 ${step} 步`;
+  for (let index = 1; index <= 4; index += 1) {
+    ui[`workflow-step-${index}`].classList.toggle("active", index === step);
+    ui[`workflow-step-${index}`].classList.toggle("done", index < step);
+  }
+}
+
+async function loadChat() {
+  if (!app.session) return;
+  try {
+    app.chat = (await api(`/api/sessions/${app.session.session_id}/chat`)).messages || [];
+  } catch (_) { app.chat = []; }
+  renderChat();
+}
+
+function renderChat() {
+  const messages = app.chat || [];
+  ui["clear-chat-button"].disabled = !app.session || messages.length === 0;
+  if (!messages.length) {
+    ui["chat-messages"].className = "chat-messages empty-state";
+    ui["chat-messages"].innerHTML = "<div><strong>尚未开始讨论</strong><p>建立村庄后，可让 DeepSeek 比较候选解释、找信息量最高的下一步。</p></div>";
+    return;
+  }
+  ui["chat-messages"].className = "chat-messages";
+  ui["chat-messages"].innerHTML = messages.map(item => `<article class="chat-message ${item.role}"><b>${item.role === "user" ? "你" : "策略模型"}</b><div>${escapeHtml(item.content).replace(/\n/g, "<br>")}</div></article>`).join("");
+  ui["chat-messages"].scrollTop = ui["chat-messages"].scrollHeight;
+}
+
+async function sendChatMessage(event) {
+  event.preventDefault();
+  if (!app.session) return;
+  const message = ui["chat-input"].value.trim();
+  if (!message) return;
+  ui["chat-send-button"].disabled = true;
+  ui["chat-send-button"].textContent = "分析中…";
+  try {
+    const result = await api(`/api/sessions/${app.session.session_id}/chat`, { method: "POST", body: JSON.stringify({ message }) });
+    app.chat = result.messages || [];
+    ui["chat-input"].value = "";
+    renderChat();
+  } catch (error) { showToast(error.message, true); }
+  finally {
+    ui["chat-send-button"].textContent = "发送追问";
+    ui["chat-send-button"].disabled = !app.session;
+  }
+}
+
+async function clearChat() {
+  if (!app.session) return;
+  try {
+    await api(`/api/sessions/${app.session.session_id}/chat`, { method: "DELETE" });
+    app.chat = [];
+    renderChat();
+  } catch (error) { showToast(error.message, true); }
 }
 
 function showToast(message, error) {

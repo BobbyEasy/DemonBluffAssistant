@@ -328,3 +328,47 @@ def test_zhipu_glm_vision_rejects_position_outside_village(tmp_path) -> None:
 
     with pytest.raises(IntegrationUnavailable, match="牌位超出"):
         service.parse_capture_zhipu(b"png", GameState(config=config()))
+
+
+def test_deepseek_strategy_chat_includes_history_solver_and_mechanics(tmp_path) -> None:
+    store = ModelConfigStore(tmp_path / "models.json", FakeProtector())
+    store.update(
+        ModelSettingsUpdate(
+            provider="deepseek",
+            model="deepseek-v4-pro",
+            api_key="test-deepseek-key",
+        )
+    )
+    client = FakeCompatibleClient([], "建议先核对 #2 的证词。")
+    service = OpenAIService(Settings(), client=client, model_store=store)
+    state = GameState(
+        config=VillageConfig(
+            card_count=3,
+            evil_count=1,
+            evil_count_max=2,
+            minion_count=0,
+            minion_count_max=1,
+            demon_count=0,
+            demon_count_max=1,
+        ),
+        seats=[SeatState(position=2, visible_role="Fortune Teller")],
+    )
+    report = SolverReport(satisfiable=True, world_count=3)
+
+    answer = service.continue_strategy_chat(
+        state,
+        report,
+        [{"role": "user", "content": "上一轮问题"}, {"role": "assistant", "content": "上一轮回答"}],
+        "现在优先验证什么？",
+    )
+
+    assert answer == "建议先核对 #2 的证词。"
+    call = client.chat.completions.calls[0]
+    assert call["model"] == "deepseek-v4-pro"
+    assert call["messages"][-1]["content"] == "现在优先验证什么？"
+    assert call["messages"][-2]["content"] == "上一轮回答"
+    context = call["messages"][1]["content"]
+    assert "solver_report" in context
+    assert "evil_count_max" in context
+    assert "腐化" in call["messages"][0]["content"]
+    assert "隐藏思维过程" in call["messages"][0]["content"]

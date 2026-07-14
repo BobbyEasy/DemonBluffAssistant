@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from demon_bluff_assistant.analysis_archive import AnalysisArchive
 from demon_bluff_assistant.capture import CaptureError
 from demon_bluff_assistant.config import Settings
 from demon_bluff_assistant.local_vision import LocalRecognitionError, LocalVisionService
@@ -16,7 +17,7 @@ from demon_bluff_assistant.model_config import (
     ModelProvider,
     ModelSettingsUpdate,
 )
-from demon_bluff_assistant.models import StatePatch, VillageConfig
+from demon_bluff_assistant.models import ChatRequest, StatePatch, VillageConfig
 from demon_bluff_assistant.openai_service import (
     AdviceValidationError,
     IntegrationUnavailable,
@@ -35,9 +36,13 @@ def create_app(
     local_vision: LocalVisionService,
     model_store: ModelConfigStore,
     captures,
+    analysis_archive: AnalysisArchive | None = None,
     serve_static: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="Demon Bluff Assistant", version="0.3.4")
+    analysis_archive = analysis_archive or AnalysisArchive(
+        settings.data_dir / "analysis.db"
+    )
+    app = FastAPI(title="Demon Bluff Assistant", version="0.4.0")
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "testserver"],
@@ -119,7 +124,9 @@ def create_app(
 
     @app.post("/api/sessions/{session_id}/events")
     def confirm_events(session_id: str, patch: StatePatch):
-        return store.apply_patch(session_id, patch)
+        state = store.apply_patch(session_id, patch)
+        analysis_archive.record_recognition(session_id, patch, state)
+        return state
 
     @app.post("/api/sessions/{session_id}/undo")
     def undo(session_id: str):
@@ -137,7 +144,47 @@ def create_app(
             advice = openai_service.generate_advice(game_state, report)
         except (IntegrationUnavailable, AdviceValidationError):
             advice = openai_service.template_advice(report)
+        analysis_archive.record_analysis(session_id, game_state, report, advice)
         return {"report": report, "advice": advice}
+
+    @app.get("/api/sessions/{session_id}/analysis/export")
+    def export_analysis(session_id: str):
+        store.get(session_id)
+        bundle = analysis_archive.export_latest(session_id)
+        if bundle is None:
+            raise HTTPException(status_code=404, detail="请先完成一次局面分析。")
+        return bundle
+
+    @app.get("/api/dataset/export")
+    def export_dataset():
+        return analysis_archive.export_dataset()
+
+    @app.get("/api/sessions/{session_id}/chat")
+    def chat_history(session_id: str):
+        store.get(session_id)
+        return {"messages": analysis_archive.chat_history(session_id)}
+
+    @app.post("/api/sessions/{session_id}/chat")
+    def chat(session_id: str, request: ChatRequest):
+        game_state = store.get(session_id)
+        report = solver.solve(game_state)
+        history = analysis_archive.chat_history(session_id)
+        answer = openai_service.continue_strategy_chat(
+            game_state, report, history, request.message
+        )
+        analysis_archive.add_chat_exchange(session_id, request.message, answer)
+        return {
+            "message": {"role": "assistant", "content": answer},
+            "messages": analysis_archive.chat_history(session_id),
+        }
+
+    @app.delete(
+        "/api/sessions/{session_id}/chat", status_code=status.HTTP_204_NO_CONTENT
+    )
+    def clear_chat(session_id: str):
+        store.get(session_id)
+        analysis_archive.clear_chat(session_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post("/api/captures")
     def capture_now():

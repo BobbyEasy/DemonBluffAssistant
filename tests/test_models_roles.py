@@ -69,6 +69,32 @@ def test_village_allows_zero_total_evils() -> None:
     assert config.evil_count == 0
 
 
+def test_village_config_accepts_character_count_ranges() -> None:
+    config = VillageConfig(
+        card_count=9,
+        evil_count=2,
+        evil_count_max=4,
+        minion_count=2,
+        minion_count_max=4,
+        demon_count=0,
+        demon_count_max=1,
+    )
+
+    assert config.evil_count_max == 4
+    assert config.minion_count_max == 4
+    assert config.demon_count_max == 1
+
+
+def test_village_config_defaults_range_maximum_to_minimum() -> None:
+    config = VillageConfig(
+        card_count=8, evil_count=2, minion_count=2, demon_count=0
+    )
+
+    assert config.evil_count_max == 2
+    assert config.minion_count_max == 2
+    assert config.demon_count_max == 0
+
+
 def test_observation_event_normalizes_targets_and_confidence() -> None:
     event = ObservationEvent(
         speaker_position=2,

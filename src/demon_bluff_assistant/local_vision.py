@@ -123,6 +123,15 @@ class LocalGameParser:
             name: self._find_labeled_int(document, labels)
             for name, labels in self.CORE_LABELS.items()
         }
+        maximums = {}
+        for name in ["evil_count", "minion_count", "demon_count"]:
+            count_range = self._find_labeled_range(
+                document, self.CORE_LABELS[name]
+            )
+            if count_range is not None:
+                values[name], maximums[name] = count_range
+            elif values[name] is not None:
+                maximums[name] = values[name]
         if values["card_count"] is None:
             values["card_count"] = self._infer_card_count(document)
         if values["evil_count"] is None and all(
@@ -130,6 +139,9 @@ class LocalGameParser:
         ):
             values["evil_count"] = (
                 values["minion_count"] + values["demon_count"]
+            )
+            maximums["evil_count"] = (
+                maximums["minion_count"] + maximums["demon_count"]
             )
 
         required = ["card_count", "evil_count", "minion_count", "demon_count"]
@@ -168,8 +180,11 @@ class LocalGameParser:
                     language=self._detect_language(document),
                     card_count=values["card_count"],
                     evil_count=values["evil_count"],
+                    evil_count_max=maximums["evil_count"],
                     minion_count=values["minion_count"],
+                    minion_count_max=maximums["minion_count"],
                     demon_count=values["demon_count"],
+                    demon_count_max=maximums["demon_count"],
                     health=health,
                     deck_roles=roles,
                 )
@@ -287,6 +302,26 @@ class LocalGameParser:
                 return candidates[0][1]
         return None
 
+    def _find_labeled_range(
+        self, document: OcrDocument, labels: list[str]
+    ) -> tuple[int, int] | None:
+        label_pattern = "(?:" + "|".join(labels) + ")"
+        separator = r"(?:-|–|—|~|至|到)"
+        patterns = [
+            r"(\d{1,2})\s*" + separator + r"\s*(\d{1,2})\s*(?:个|名|只)?\s*" + label_pattern,
+            label_pattern + r"\s*[:：=]?\s*\d{1,2}\s*/\s*(\d{1,2})\s*" + separator + r"\s*(\d{1,2})",
+            label_pattern + r"\s*[:：=]?\s*(\d{1,2})\s*" + separator + r"\s*(\d{1,2})",
+        ]
+        for token in document.tokens:
+            text = unicodedata.normalize("NFKC", token.text)
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    minimum, maximum = int(match.group(1)), int(match.group(2))
+                    if minimum <= maximum:
+                        return minimum, maximum
+        return None
+
     @staticmethod
     def _infer_health(document: OcrDocument) -> int | None:
         candidates = []
@@ -303,11 +338,18 @@ class LocalGameParser:
     def _infer_card_count(self, document: OcrDocument) -> int | None:
         positions = set()
         for token in document.tokens:
+            if not re.fullmatch(
+                r"\s*(?:#|牌位|seat)\s*\d{1,2}\s*",
+                token.text,
+                re.IGNORECASE,
+            ):
+                continue
             for match in re.finditer(r"(?:#|牌位|seat)\s*(\d{1,2})", token.text, re.IGNORECASE):
                 positions.add(int(match.group(1)))
         if len(positions) >= 3:
             maximum = max(positions)
-            if positions.issuperset(range(1, maximum + 1)) and maximum <= 20:
+            enough_labels = len(positions) >= max(3, maximum - 1)
+            if enough_labels and maximum <= 20:
                 return maximum
         return None
 

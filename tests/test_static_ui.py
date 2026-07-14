@@ -32,11 +32,17 @@ def test_companion_page_contains_required_workflow_surfaces() -> None:
         "capture-lightbox",
         "zoom-in-button",
         "zoom-out-button",
+        "workflow-guide",
+        "pending-summary",
+        "export-analysis-button",
+        "export-dataset-button",
+        "strategy-chat",
+        "chat-form",
     ]:
         assert f'id="{element_id}"' in html
     assert "/static/styles.css" in html
     assert "/static/app.js" in html
-    assert "v0.3.4" in html
+    assert "v0.4.0" in html
     assert "本机离线 OCR" in html
 
 
@@ -57,3 +63,7 @@ def test_frontend_submits_api_key_only_to_local_settings_endpoint() -> None:
     assert 'ui["pending-json"].value' in javascript
     assert "saveGlmVisionSettings" in javascript
     assert "selectedVisionEngine" in javascript
+    assert "exportAnalysis" in javascript
+    assert "exportDataset" in javascript
+    assert "/analysis/export" in javascript
+    assert "sendChatMessage" in javascript

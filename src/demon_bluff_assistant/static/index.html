@@ -14,7 +14,7 @@
       <div class="sigil">DB</div>
       <div>
         <p class="eyebrow">FAIR-PLAY COMPANION</p>
-        <h1>Demon Bluff 决策助手 <small>v0.3.4</small></h1>
+        <h1>Demon Bluff 决策助手 <small>v0.4.0</small></h1>
       </div>
     </div>
     <div class="top-status">
@@ -57,13 +57,14 @@
         </div>
         <form id="new-session-form" class="form-grid">
           <label>牌数<input name="card_count" type="number" min="3" max="20" value="9" required></label>
-          <label>恶徒总数<input name="evil_count" type="number" min="0" value="2" required></label>
-          <label>爪牙数<input name="minion_count" type="number" min="0" value="1" required></label>
-          <label>恶魔数<input name="demon_count" type="number" min="0" value="1" required></label>
+          <label>恶徒数量/范围<input name="evil_count" type="text" value="2" placeholder="例如 2 或 2-4" required></label>
+          <label>爪牙数量/范围<input name="minion_count" type="text" value="1" placeholder="例如 1 或 2-4" required></label>
+          <label>恶魔数量/范围<input name="demon_count" type="text" value="1" placeholder="例如 0 或 0-1" required></label>
           <label>生命<input name="health" type="number" min="0" value="10" required></label>
           <label>游戏语言<select name="language"><option value="zh-Hans">简体中文</option><option value="en">English</option></select></label>
           <button class="primary wide" type="submit">创建新村庄</button>
         </form>
+        <p class="microcopy">数量支持固定值或范围，例如恶徒填 <code>2-4</code>、爪牙填 <code>2-4</code>、恶魔填 <code>0-1</code>。</p>
         <div class="session-tools">
           <button id="undo-button" class="ghost" type="button" disabled>撤销上一步</button>
           <button id="export-button" class="ghost" type="button" disabled>导出局面</button>
@@ -145,6 +146,19 @@
     </aside>
 
     <section class="main-column">
+      <section id="workflow-guide" class="panel workflow-guide">
+        <div class="section-heading">
+          <div><p class="eyebrow">QUICK START</p><h2>四步完成一轮判断</h2></div>
+          <span id="workflow-status" class="tiny-badge">第 1 步</span>
+        </div>
+        <ol class="workflow-steps">
+          <li id="workflow-step-1"><b>1</b><span><strong>建立村庄</strong><small>总览截图自动识别，或左侧手工填写人数范围</small></span></li>
+          <li id="workflow-step-2"><b>2</b><span><strong>采集局面</strong><small>翻牌或角色发言后重新截图并解析</small></span></li>
+          <li id="workflow-step-3"><b>3</b><span><strong>人工核对</strong><small>确认牌号、角色与气泡归属再写入求解器</small></span></li>
+          <li id="workflow-step-4"><b>4</b><span><strong>分析与追问</strong><small>查看硬约束结论，并让 DeepSeek 深入讨论</small></span></li>
+        </ol>
+      </section>
+
       <section class="panel board-panel">
         <div class="section-heading board-heading">
           <div><p class="eyebrow">CURRENT TABLE</p><h2>当前牌桌</h2></div>
@@ -161,12 +175,16 @@
           <span id="confidence-badge" class="tiny-badge">无待确认内容</span>
         </div>
         <div id="pending-warnings" class="warning-list"></div>
-        <textarea id="pending-json" spellcheck="false" aria-label="待确认 JSON">{
+        <div id="pending-summary" class="pending-summary empty-state"><div><strong>暂无识别内容</strong><p>解析截图后先在这里核对牌号、角色和证词。</p></div></div>
+        <details class="advanced-editor">
+          <summary>高级修正：编辑结构化 JSON</summary>
+          <textarea id="pending-json" spellcheck="false" aria-label="待确认 JSON">{
   "seats": [],
   "events": [],
   "warnings": [],
   "overall_confidence": 0
 }</textarea>
+        </details>
         <div class="row-actions">
           <button id="clear-pending" class="ghost" type="button">清空</button>
           <button id="export-recognition-button" class="ghost" type="button" disabled>导出识别结果</button>
@@ -178,11 +196,29 @@
       <section id="analysis-panel" class="panel analysis-panel">
         <div class="section-heading">
           <div><p class="eyebrow">SOLVER + STRATEGY</p><h2>局面判断</h2></div>
-          <button id="reanalyze-button" class="ghost" type="button" disabled>重新分析</button>
+          <div class="heading-actions">
+            <button id="export-dataset-button" class="ghost" type="button" disabled>导出全部样本</button>
+            <button id="export-analysis-button" class="ghost" type="button" disabled>导出分析与识别</button>
+            <button id="reanalyze-button" class="ghost" type="button" disabled>重新分析</button>
+          </div>
         </div>
         <div id="advice" class="advice empty-state"><div><strong>等待确认信息</strong><p>确认牌面或证词后，这里会显示下一步建议。</p></div></div>
         <div id="assessments" class="assessment-grid"></div>
         <div id="solver-notes" class="solver-notes"></div>
+        <p class="microcopy">“必恶/必善”来自本地硬约束；“偏恶”只是当前一致世界占比，不是真实概率。模型解释不能覆盖求解器结论。</p>
+      </section>
+
+      <section id="strategy-chat" class="panel chat-panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">MULTI-TURN STRATEGY CHAT</p><h2>继续追问策略模型</h2></div>
+          <button id="clear-chat-button" class="ghost" type="button" disabled>清空对话</button>
+        </div>
+        <div id="chat-messages" class="chat-messages empty-state"><div><strong>尚未开始讨论</strong><p>建立村庄后，可让 DeepSeek 比较候选解释、找信息量最高的下一步。</p></div></div>
+        <form id="chat-form" class="chat-form">
+          <textarea id="chat-input" maxlength="4000" rows="3" placeholder="例如：逐条说明 #4 与 #8 的矛盾；下一次翻牌怎样最大化信息量？" disabled></textarea>
+          <button id="chat-send-button" class="primary" type="submit" disabled>发送追问</button>
+        </form>
+        <p class="microcopy">对话会带上当前已确认局面、求解器报告和最近 20 条消息。请勿把模型猜测当作确定结论。</p>
       </section>
     </section>
   </main>

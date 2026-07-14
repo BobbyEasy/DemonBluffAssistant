@@ -28,6 +28,28 @@ def assessment(report, position: int):
     return next(item for item in report.assessments if item.position == position)
 
 
+def test_solver_enumerates_every_evil_count_in_configured_range() -> None:
+    state = GameState(
+        config=VillageConfig(
+            card_count=3,
+            evil_count=1,
+            evil_count_max=2,
+            minion_count=0,
+            minion_count_max=2,
+            demon_count=0,
+            demon_count_max=1,
+        ),
+        seats=[SeatState(position=position) for position in range(1, 4)],
+    )
+
+    report = WorldSolver().solve(state)
+
+    assert report.satisfiable is True
+    assert report.world_count == 6
+    assert all(item.consistent_world_share == 0.5 for item in report.assessments)
+    assert any("1-2" in note and "不是真实概率" in note for note in report.notes)
+
+
 def test_truthful_claim_can_prove_an_evil_and_safe_execution() -> None:
     state = make_state()
     state.seats[0].confirmed_alignment = "good"

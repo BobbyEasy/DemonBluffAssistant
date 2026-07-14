@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from demon_bluff_assistant.api import create_app
+from demon_bluff_assistant.analysis_archive import AnalysisArchive
 from demon_bluff_assistant.capture import (
     CaptureCoordinator,
     CaptureRegistry,
@@ -88,6 +89,7 @@ def build_runtime(settings: Settings | None = None) -> Runtime:
         local_vision=local_vision,
         model_store=model_store,
         captures=captures,
+        analysis_archive=AnalysisArchive(settings.data_dir / "analysis.db"),
     )
     return Runtime(
         app=app, captures=captures, hotkey=hotkey, model_store=model_store

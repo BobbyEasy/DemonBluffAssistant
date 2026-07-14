@@ -45,9 +45,18 @@ class WorldSolver:
         }
         notes: list[str] = []
 
+        if state.config.evil_count != state.config.evil_count_max:
+            notes.append(
+                f"恶徒总数按 {state.config.evil_count}-{state.config.evil_count_max} "
+                "逐一枚举；一致世界占比只用于比较，不是真实概率。"
+            )
+
+        evil_total = Sum([If(evil[position], 1, 0) for position in evil])
         solver.assert_and_track(
-            Sum([If(evil[position], 1, 0) for position in evil])
-            == state.config.evil_count,
+            And(
+                evil_total >= state.config.evil_count,
+                evil_total <= state.config.evil_count_max,
+            ),
             Bool("rule:evil_count"),
         )
 

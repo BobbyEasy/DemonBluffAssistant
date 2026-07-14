@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Phase(StrEnum):
@@ -46,17 +46,36 @@ class VillageConfig(BaseModel):
     language: str = "zh-Hans"
     card_count: int = Field(ge=3, le=20)
     evil_count: int = Field(ge=0)
+    evil_count_max: int | None = Field(default=None, ge=0)
     minion_count: int = Field(ge=0)
+    minion_count_max: int | None = Field(default=None, ge=0)
     demon_count: int = Field(ge=0)
+    demon_count_max: int | None = Field(default=None, ge=0)
     health: int = Field(default=10, ge=0)
     deck_roles: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_counts(self) -> "VillageConfig":
-        if self.evil_count >= self.card_count:
-            raise ValueError("evil_count must be lower than card_count")
-        if self.minion_count + self.demon_count > self.evil_count:
-            raise ValueError("minion and demon counts exceed evil_count")
+        if self.evil_count_max is None:
+            self.evil_count_max = self.evil_count
+        if self.minion_count_max is None:
+            self.minion_count_max = self.minion_count
+        if self.demon_count_max is None:
+            self.demon_count_max = self.demon_count
+        ranges = [
+            ("evil", self.evil_count, self.evil_count_max),
+            ("minion", self.minion_count, self.minion_count_max),
+            ("demon", self.demon_count, self.demon_count_max),
+        ]
+        for name, minimum, maximum in ranges:
+            if maximum < minimum:
+                raise ValueError(f"{name} maximum must not be lower than minimum")
+        if self.evil_count_max >= self.card_count:
+            raise ValueError("evil_count_max must be lower than card_count")
+        if self.minion_count + self.demon_count > self.evil_count_max:
+            raise ValueError("minimum minion and demon counts exceed evil range")
+        if self.minion_count_max + self.demon_count_max < self.evil_count:
+            raise ValueError("minion and demon ranges cannot reach evil minimum")
         return self
 
 
@@ -156,3 +175,15 @@ class Advice(BaseModel):
     evidence_event_ids: list[str] = Field(default_factory=list)
     alternatives: list[str] = Field(default_factory=list)
     uncertainty: str
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("message")
+    @classmethod
+    def strip_message(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("message must not be blank")
+        return value

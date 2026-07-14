@@ -45,13 +45,29 @@ ADVICE_INSTRUCTIONS = """
 你是 Demon Bluff 标准模式的中文策略解释器。
 本地 SolverReport 是唯一可信的逻辑结论。只能从 legal_actions 选择动作；不得改变嫌疑分类、
 不得虚构牌号或事件。证据必须引用已存在的 event_id。信息不足时明确承认不确定性，优先取证。
+reasoning 只写可核对的推理摘要：已知事实、硬约束、候选解释、建议与不确定性，不输出隐藏思维过程。
 输出严格符合 Advice。
+""".strip()
+
+
+CHAT_INSTRUCTIONS = """
+你是 Demon Bluff 标准模式的中文局面讨论助手。你必须以本地 SolverReport
+作为不可覆盖的硬约束，不得把“一致世界占比”说成真实概率，不得虚构牌位、
+证词、角色或合法动作。腐化会使角色说谎且能力失败；伪装会隐藏真实角色；
+圆桌相邻和左右方向按牌号环形关系计算；恶徒、爪牙和恶魔数量都可能是范围。
+
+请回答用户当前问题，并给出可核对的推理摘要，而不是隐藏思维过程。适合时按
+“已知事实、硬约束、仍兼容的解释、最值得验证的信息、行动建议、不确定性”组织。
+明确区分求解器结论、角色机制推断和模型猜测。若局面无解，先指出冲突并停止
+给出处决结论。建议行动必须来自 SolverReport.legal_actions。
 """.strip()
 
 
 VILLAGE_INSTRUCTIONS = """
 你是 Demon Bluff Demo 的新村庄配置抄录器，不分析隐藏身份。
 只从玩家可见的牌桌总览或牌组页面读取：界面语言、牌数、恶徒总数、爪牙/走卒数、恶魔数、生命和牌组角色。
+人数可能显示为 2-4、0-1 之类的范围，必须分别写入对应的最小值字段和 *_count_max；固定值的最小值和最大值相同。
+数值 0 是有效结果，不能当作缺失。
 只有在创建村庄所需的牌数及阵营数量都清楚可见时才填写 config；否则 config 必须为 null，
 并在 warnings 中准确说明还需要哪一张画面。不得根据常见默认值猜测。输出严格符合 VillageSetupSuggestion。
 """.strip()
@@ -64,6 +80,7 @@ ZHIPU_VISION_INSTRUCTIONS = """
 角色名必须按卡牌本身的位置归属；证词必须根据气泡尾部指向的卡牌归属，不能按文字最近距离猜测。
 未翻开的卡牌不能虚构角色。无法确定的字段保持默认值并写入 warnings。
 visible_role 使用给定角色目录中的英文 name_en；deck_roles 使用 role_id。
+村庄统计中的恶徒、爪牙和恶魔可能是范围（例如 2-4、0-1），必须保留范围；数值 0 不是缺失。
 """.strip()
 
 
@@ -336,6 +353,64 @@ class OpenAIService:
         advice = Advice.model_validate(parsed)
         self._validate_advice(advice, state, report)
         return advice
+
+    def continue_strategy_chat(
+        self,
+        state: GameState,
+        report: SolverReport,
+        history: list[dict],
+        message: str,
+    ) -> str:
+        profile = self._active_profile()
+        if profile is None:
+            raise IntegrationUnavailable(
+                "未配置策略模型 API Key；请先在模型设置中配置 DeepSeek、OpenAI 或兼容模型。"
+            )
+        context = {
+            "state": state.model_dump(mode="json"),
+            "solver_report": report.model_dump(mode="json"),
+            "visible_role_rules": self._visible_role_rules(state),
+            "mechanics": {
+                "count_ranges": "数量范围表示求解器必须枚举范围内所有可行总数。",
+                "corruption": "腐化角色会说谎，且其能力不会生效。",
+                "disguise": "伪装角色的可见身份不能直接视为真实身份。",
+                "circle": "#1 与最后一张牌相邻，左右和距离沿圆桌计算。",
+                "wretch": "卑鄙鬼等角色可能按特殊规则登记阵营，需结合具体证词核对。",
+            },
+        }
+        messages = [
+            {"role": "system", "content": CHAT_INSTRUCTIONS},
+            {
+                "role": "system",
+                "content": "当前已确认局面：\n"
+                + json.dumps(context, ensure_ascii=False),
+            },
+        ]
+        for item in history[-20:]:
+            if item.get("role") in {"user", "assistant"} and item.get("content"):
+                messages.append(
+                    {"role": item["role"], "content": str(item["content"])}
+                )
+        messages.append({"role": "user", "content": message.strip()})
+        client = self._client_for(profile)
+        last_error: Exception | None = None
+        for _ in range(2):
+            try:
+                response = client.chat.completions.create(
+                    model=profile.model,
+                    messages=messages,
+                    stream=False,
+                    max_tokens=4096,
+                )
+                content = response.choices[0].message.content
+                if not content or not content.strip():
+                    raise ValueError("模型返回了空内容。")
+                return re.sub(
+                    r"<think>.*?</think>", "", content, flags=re.DOTALL
+                ).strip()
+            except Exception as exc:
+                last_error = exc
+        raise IntegrationUnavailable(f"策略对话调用失败：{last_error}") from last_error
 
     def _visible_role_rules(self, state: GameState) -> list[dict]:
         rules = []

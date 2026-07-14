@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from demon_bluff_assistant.api import create_app
+from demon_bluff_assistant.analysis_archive import AnalysisArchive
 from demon_bluff_assistant.capture import CaptureRegistry
 from demon_bluff_assistant.config import Settings
 from demon_bluff_assistant.model_config import ModelConfigStore
@@ -82,6 +83,9 @@ class FakeAI(OpenAIService):
             uncertainty="信息不足",
         )
 
+    def continue_strategy_chat(self, state, report, history, message):
+        return f"基于当前局面回答：{message}"
+
 
 class FakeLocalVision:
     def parse_capture(self, png_bytes, state):
@@ -125,6 +129,7 @@ def client(tmp_path, openai_service=None) -> TestClient:
         local_vision=FakeLocalVision(),
         model_store=ModelConfigStore(tmp_path / "models.json", FakeProtector()),
         captures=FakeCaptures(),
+        analysis_archive=AnalysisArchive(tmp_path / "analysis.db"),
         serve_static=False,
     )
     return TestClient(app)
@@ -298,3 +303,72 @@ def test_invalid_model_advice_falls_back_instead_of_crashing_analysis(tmp_path) 
 
     assert analysis.status_code == 200
     assert analysis.json()["advice"]["summary"] == "已安全回退到本地建议"
+
+
+def test_analysis_export_pairs_confirmed_recognition_and_solver_result(tmp_path) -> None:
+    api = client(tmp_path)
+    state = api.post(
+        "/api/sessions",
+        json={
+            "card_count": 3,
+            "evil_count": 1,
+            "minion_count": 0,
+            "demon_count": 1,
+        },
+    ).json()
+    patch = {
+        "seats": [{"position": 2, "visible_role": "Alchemist"}],
+        "events": [],
+        "warnings": ["人工核对完成"],
+        "overall_confidence": 0.91,
+        "recognition_engine": "glm-4.6v-flash",
+    }
+    api.post(f"/api/sessions/{state['session_id']}/events", json=patch)
+    api.get(f"/api/sessions/{state['session_id']}/analysis")
+
+    exported = api.get(
+        f"/api/sessions/{state['session_id']}/analysis/export"
+    )
+
+    assert exported.status_code == 200
+    body = exported.json()
+    assert body["confirmed_recognition"]["recognition_engine"] == "glm-4.6v-flash"
+    assert body["confirmed_state"]["seats"][1]["visible_role"] == "Alchemist"
+    assert body["analysis"]["report"]["satisfiable"] is True
+    dataset = api.get("/api/dataset/export").json()
+    assert dataset["schema_version"] == 1
+    assert dataset["records"][0]["analysis_id"] == body["analysis_id"]
+
+
+def test_strategy_chat_keeps_multi_turn_history_and_can_be_cleared(tmp_path) -> None:
+    api = client(tmp_path)
+    state = api.post(
+        "/api/sessions",
+        json={
+            "card_count": 3,
+            "evil_count": 1,
+            "minion_count": 0,
+            "demon_count": 1,
+        },
+    ).json()
+    session_id = state["session_id"]
+
+    first = api.post(
+        f"/api/sessions/{session_id}/chat", json={"message": "先翻哪张？"}
+    )
+    second = api.post(
+        f"/api/sessions/{session_id}/chat", json={"message": "为什么？"}
+    )
+    history = api.get(f"/api/sessions/{session_id}/chat").json()["messages"]
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert [item["role"] for item in history] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    cleared = api.delete(f"/api/sessions/{session_id}/chat")
+    assert cleared.status_code == 204
+    assert api.get(f"/api/sessions/{session_id}/chat").json()["messages"] == []
