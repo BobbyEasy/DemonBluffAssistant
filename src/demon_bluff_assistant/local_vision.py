@@ -186,8 +186,12 @@ class LocalGameParser:
         )
 
     def parse_state(self, document: OcrDocument, state: GameState) -> StatePatch:
-        position_tokens = self._position_tokens(document, state.config.card_count)
-        best_by_position: dict[int, tuple[float, SeatState]] = {}
+        position_tokens = self._seat_position_tokens(
+            document, state.config.card_count
+        )
+        best_by_position: dict[
+            int, tuple[float, OcrToken, RoleDefinition]
+        ] = {}
         warnings = []
         for role_token in document.tokens:
             matched = self._match_role(role_token.text)
@@ -197,36 +201,38 @@ class LocalGameParser:
             score = role_token.confidence * match_score
             if score < 0.72:
                 continue
-            position = self._position_in_text(role_token.text, state.config.card_count)
+            position = self._role_position(
+                role_token, position_tokens, document.width, document.height
+            )
             if position is None:
-                position = self._nearest_position(
-                    role_token, position_tokens, document.width, document.height
-                )
-            if position is None:
-                warnings.append(f"识别到角色“{role.name_zh}”，但无法确定牌位。")
                 continue
+            previous = best_by_position.get(position)
+            if previous is None or score > previous[0]:
+                best_by_position[position] = (score, role_token, role)
 
-            nearby = self._nearby_claim_text(role_token, document, position_tokens)
+        claims = self._claim_text_by_position(
+            document, position_tokens, best_by_position
+        )
+        seats = []
+        for position, (_, role_token, role) in sorted(best_by_position.items()):
+            claim_text = claims.get(position)
             values = {"position": position, "visible_role": role.name_en}
-            if nearby:
-                values["claim_text"] = " ".join(nearby)
-            status_text = _normalize(" ".join(nearby + [role_token.text]))
+            if claim_text:
+                values["claim_text"] = claim_text
+            status_text = _normalize(" ".join([claim_text or "", role_token.text]))
             if any(word in status_text for word in ["已翻开", "翻开", "revealed", "faceup"]):
                 values["revealed"] = True
             if any(word in status_text for word in ["死亡", "已死", "dead"]):
                 values["alive"] = False
             if any(word in status_text for word in ["腐化", "corrupted", "poisoned"]):
                 values["corrupted"] = True
-            seat = SeatState.model_validate(values)
-            previous = best_by_position.get(position)
-            if previous is None or score > previous[0]:
-                best_by_position[position] = (score, seat)
+            seats.append(SeatState.model_validate(values))
 
-        scores = [score for score, _ in best_by_position.values()]
+        scores = [score for score, _, _ in best_by_position.values()]
         if not best_by_position:
             warnings.append("未能把任何角色名称与牌位配对；请确认截图是否包含已翻开的牌。")
         return StatePatch(
-            seats=[item[1] for item in sorted(best_by_position.values(), key=lambda item: item[1].position)],
+            seats=seats,
             warnings=warnings,
             overall_confidence=(sum(scores) / len(scores)) if scores else 0,
             recognition_engine="rapidocr-local",
@@ -335,9 +341,17 @@ class LocalGameParser:
             for labels in self.CORE_LABELS.values()
         )
 
-    def _position_tokens(self, document: OcrDocument, maximum: int) -> list[tuple[OcrToken, int]]:
+    def _seat_position_tokens(
+        self, document: OcrDocument, maximum: int
+    ) -> list[tuple[OcrToken, int]]:
         result = []
         for token in document.tokens:
+            if not re.fullmatch(
+                r"\s*(?:#|牌位|seat)\s*\d{1,2}\s*",
+                token.text,
+                re.IGNORECASE,
+            ):
+                continue
             position = self._position_in_text(token.text, maximum)
             if position is not None:
                 result.append((token, position))
@@ -351,40 +365,90 @@ class LocalGameParser:
         position = int(match.group(1))
         return position if 1 <= position <= maximum else None
 
-    def _nearest_position(
+    def _role_position(
         self,
         role_token: OcrToken,
         positions: list[tuple[OcrToken, int]],
         width: int,
         height: int,
     ) -> int | None:
-        if not positions:
-            return None
-        nearest = min(
-            positions,
-            key=lambda item: self._distance(role_token, item[0], width, height),
-        )
-        return nearest[1] if self._distance(role_token, nearest[0], width, height) < 0.22 else None
+        candidates = []
+        for position_token, position in positions:
+            horizontal = abs(
+                role_token.center[0] - position_token.center[0]
+            ) / max(width, 1)
+            vertical = (
+                role_token.center[1] - position_token.center[1]
+            ) / max(height, 1)
+            if horizontal <= 0.08 and 0.02 <= vertical <= 0.24:
+                cost = horizontal * 2 + abs(vertical - 0.145)
+                candidates.append((cost, position))
+        return min(candidates)[1] if candidates else None
 
-    def _nearby_claim_text(
+    def _claim_text_by_position(
         self,
-        role_token: OcrToken,
         document: OcrDocument,
         position_tokens: list[tuple[OcrToken, int]],
-    ) -> list[str]:
+        roles_by_position: dict[int, tuple[float, OcrToken, RoleDefinition]],
+    ) -> dict[int, str]:
+        position_by_number = {
+            position: token for token, position in position_tokens
+        }
+        card_centers = {}
+        role_label_objects = set()
+        for position, (_, role_token, _) in roles_by_position.items():
+            position_token = position_by_number.get(position)
+            if position_token is None:
+                continue
+            role_label_objects.add(id(role_token))
+            card_centers[position] = (
+                (position_token.center[0] + role_token.center[0]) / 2,
+                (position_token.center[1] + role_token.center[1]) / 2,
+            )
+
         position_objects = {id(token) for token, _ in position_tokens}
-        result = []
+        claim_tokens: dict[int, list[OcrToken]] = {}
         for token in document.tokens:
-            if token is role_token or id(token) in position_objects:
+            if id(token) in position_objects or id(token) in role_label_objects:
                 continue
-            if self._match_role(token.text):
+            normalized = _normalize(token.text)
+            if not normalized:
                 continue
-            if len(_normalize(token.text)) < 3:
+            if re.fullmatch(r"[a-z0-9]+", normalized) and len(normalized) <= 2:
                 continue
-            horizontal = abs(token.center[0] - role_token.center[0]) / max(document.width, 1)
-            vertical = abs(token.center[1] - role_token.center[1]) / max(document.height, 1)
-            if horizontal < 0.20 and vertical < 0.16:
-                result.append(token.text)
+            if not card_centers:
+                continue
+            nearest_position, distance = min(
+                (
+                    (
+                        position,
+                        math.hypot(
+                            token.center[0] - center[0],
+                            token.center[1] - center[1],
+                        ),
+                    )
+                    for position, center in card_centers.items()
+                ),
+                key=lambda item: item[1],
+            )
+            if distance / max(min(document.width, document.height), 1) <= 0.18:
+                claim_tokens.setdefault(nearest_position, []).append(token)
+
+        return {
+            position: self._join_claim_tokens(tokens)
+            for position, tokens in claim_tokens.items()
+            if tokens
+        }
+
+    @staticmethod
+    def _join_claim_tokens(tokens: list[OcrToken]) -> str:
+        result = ""
+        for token in sorted(tokens, key=lambda item: (item.top, item.left)):
+            text = token.text.strip()
+            if result and re.fullmatch(r"[\u4e00-\u9fff]", text):
+                result += text
+            else:
+                result += (" " if result else "") + text
         return result
 
     @staticmethod

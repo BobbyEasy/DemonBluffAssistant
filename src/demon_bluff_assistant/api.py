@@ -37,7 +37,7 @@ def create_app(
     captures,
     serve_static: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="Demon Bluff Assistant", version="0.3.2")
+    app = FastAPI(title="Demon Bluff Assistant", version="0.3.3")
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=["127.0.0.1", "localhost", "testserver"],

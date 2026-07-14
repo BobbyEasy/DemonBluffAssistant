@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "demon-bluff-assistant"
-version = "0.3.2"
+version = "0.3.3"
 description = "Fair-play decision companion for the Demon Bluff demo"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"

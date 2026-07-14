@@ -32,7 +32,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 function bindElements() {
-  for (const id of ["api-status","model-settings-badge","model-settings-form","model-provider","model-name","model-options","model-base-url-wrap","model-base-url","model-api-key","clear-model-key","model-settings-note","session-badge","new-session-form","undo-button","export-button","import-input","capture-button","detect-village-button","parse-button","capture-message","capture-status-dot","capture-preview","capture-preview-wrap","capture-lightbox","capture-lightbox-image","zoom-out-button","zoom-in-button","zoom-reset-button","zoom-label","close-lightbox-button","village-detection","village-detection-summary","village-detection-evidence","village-detection-warnings","confirm-village-button","discard-village-button","manual-form","manual-type","manual-seat-fields","manual-event-fields","manual-visible-role","event-role","board","village-stats","pending-json","pending-warnings","confidence-badge","clear-pending","confirm-pending","reanalyze-button","advice","assessments","solver-notes","toast"]) ui[id] = document.getElementById(id);
+  for (const id of ["api-status","model-settings-badge","model-settings-form","model-provider","model-name","model-options","model-base-url-wrap","model-base-url","model-api-key","clear-model-key","model-settings-note","session-badge","new-session-form","undo-button","export-button","import-input","capture-button","detect-village-button","parse-button","capture-message","capture-status-dot","capture-preview","capture-preview-wrap","capture-lightbox","capture-lightbox-image","zoom-out-button","zoom-in-button","zoom-reset-button","zoom-label","close-lightbox-button","village-detection","village-detection-summary","village-detection-evidence","village-detection-warnings","confirm-village-button","discard-village-button","manual-form","manual-type","manual-seat-fields","manual-event-fields","manual-visible-role","event-role","board","village-stats","pending-json","pending-warnings","confidence-badge","clear-pending","export-recognition-button","confirm-pending","reanalyze-button","advice","assessments","solver-notes","toast"]) ui[id] = document.getElementById(id);
 }
 
 function bindEvents() {
@@ -46,6 +46,7 @@ function bindEvents() {
   ui["discard-village-button"].addEventListener("click", clearVillageSuggestion);
   ui["confirm-pending"].addEventListener("click", confirmPending);
   ui["clear-pending"].addEventListener("click", () => setPending(emptyPatch()));
+  ui["export-recognition-button"].addEventListener("click", exportRecognition);
   ui["undo-button"].addEventListener("click", undo);
   ui["export-button"].addEventListener("click", exportSession);
   ui["import-input"].addEventListener("change", importSession);
@@ -311,6 +312,7 @@ function setPending(patch) {
   const confidence = Math.round((patch.overall_confidence || 0) * 100);
   ui["confidence-badge"].textContent = hasContent ? `识别置信度 ${confidence}%` : "无待确认内容";
   ui["confirm-pending"].disabled = !hasContent;
+  ui["export-recognition-button"].disabled = !hasRecognitionData(patch);
 }
 
 function validatePendingEditor() {
@@ -318,8 +320,34 @@ function validatePendingEditor() {
     const value = JSON.parse(ui["pending-json"].value);
     const hasContent = (value.seats?.length || 0) + (value.events?.length || 0) > 0;
     ui["confirm-pending"].disabled = !hasContent;
+    ui["export-recognition-button"].disabled = !hasRecognitionData(value);
     ui["pending-json"].classList.remove("invalid");
-  } catch (_) { ui["confirm-pending"].disabled = true; ui["pending-json"].classList.add("invalid"); }
+  } catch (_) {
+    ui["confirm-pending"].disabled = true;
+    ui["export-recognition-button"].disabled = true;
+    ui["pending-json"].classList.add("invalid");
+  }
+}
+
+function hasRecognitionData(value) {
+  return Boolean(
+    (value.seats?.length || 0) +
+    (value.events?.length || 0) +
+    (value.warnings?.length || 0) +
+    (value.raw_text?.length || 0)
+  );
+}
+
+function exportRecognition() {
+  let value;
+  try { value = JSON.parse(ui["pending-json"].value); }
+  catch (_) { return showToast("待确认 JSON 格式不正确，无法导出。", true); }
+  if (!hasRecognitionData(value)) return showToast("当前没有可导出的识别结果。", true);
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }));
+  link.download = `demon-bluff-recognition-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 async function confirmPending() {

@@ -1,5 +1,5 @@
 {
-  "version": "demo-2026.07-standard-v1",
+  "version": "demo-2026.07-standard-v2",
   "roles": [
     {"role_id":"alchemist","name_en":"Alchemist","name_zh":"炼金术士","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"corruption_count","lie_rule":"invert","description_en":"Cures corruption within range 2 and learns how many corruptions were nearby."},
     {"role_id":"architect","name_en":"Architect","name_zh":"建筑师","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"side_more_evil","lie_rule":"invert","description_en":"Learns which side of the circle contains more Evil."},
@@ -17,7 +17,7 @@
     {"role_id":"jester","name_en":"Jester","name_zh":"小丑","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"evil_count","lie_rule":"invert","description_en":"For three targets, learns how many are Evil."},
     {"role_id":"judge","name_en":"Judge","name_zh":"法官","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"liar_status","lie_rule":"invert","description_en":"For one target, learns whether that character is lying."},
     {"role_id":"knight","name_en":"Knight","name_zh":"骑士","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"passive","lie_rule":"none","description_en":"Cannot die while the ability is active."},
-    {"role_id":"knitter","name_en":"Knitter","name_zh":"编织者","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"adjacent_evil_pairs","lie_rule":"invert","description_en":"Learns how many Evil characters are adjacent to each other."},
+    {"role_id":"knitter","name_en":"Knitter","name_zh":"编织者","aliases":["针织者"],"alignment":"good","character_type":"villager","ability_kind":"adjacent_evil_pairs","lie_rule":"invert","description_en":"Learns how many Evil characters are adjacent to each other."},
     {"role_id":"lover","name_en":"Lover","name_zh":"恋人","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"adjacent_evil_count","lie_rule":"invert","description_en":"Learns how many adjacent characters are Evil."},
     {"role_id":"medium","name_en":"Medium","name_zh":"灵媒","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"good_seat","lie_rule":"special_disguised_target","description_en":"Learns a Good character and its role."},
     {"role_id":"oracle","name_en":"Oracle","name_zh":"神谕者","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"any_evil","lie_rule":"special_both_good","description_en":"Reports that one of two characters is a specific Minion role."},
@@ -27,7 +27,7 @@
     {"role_id":"witness","name_en":"Witness","name_zh":"目击者","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"affected_by_evil","lie_rule":"invert","description_en":"Learns a character affected by an Evil ability."},
     {"role_id":"investigator","name_en":"Investigator","name_zh":"调查员","aliases":[],"alignment":"good","character_type":"villager","ability_kind":"suspicious_type","lie_rule":"invert","description_en":"For two targets, reports the most suspicious character type."},
 
-    {"role_id":"wretch","name_en":"Wretch","name_zh":"可怜虫","aliases":[],"alignment":"good","character_type":"outcast","ability_kind":"register_minion","lie_rule":"none","description_en":"Registers as a random Evil Minion to other characters."},
+    {"role_id":"wretch","name_en":"Wretch","name_zh":"可怜虫","aliases":["倒霉鬼"],"alignment":"good","character_type":"outcast","ability_kind":"register_minion","lie_rule":"none","description_en":"Registers as a random Evil Minion to other characters."},
     {"role_id":"rambler","name_en":"Rambler","name_zh":"闲谈者","aliases":[],"alignment":"good","character_type":"outcast","ability_kind":"silence_adjacent","lie_rule":"special_reverse_silence","description_en":"Adjacent truthful characters are silenced instead of sharing information."},
     {"role_id":"plague_doctor","name_en":"Plague Doctor","name_zh":"瘟疫医生","aliases":["Plaguedoctor"],"alignment":"good","character_type":"outcast","ability_kind":"corruption_probe","lie_rule":"invert","description_en":"Corrupts one Villager at game start and can probe a target for corruption."},
     {"role_id":"drunk","name_en":"Drunk","name_zh":"酒鬼","aliases":[],"alignment":"good","character_type":"outcast","ability_kind":"disguise","lie_rule":"always_lie","description_en":"Disguises as a not-in-play Villager, is corrupted, lies, and cannot be cured."},
